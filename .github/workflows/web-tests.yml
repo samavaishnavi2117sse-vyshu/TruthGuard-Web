@@ -1,0 +1,42 @@
+name: TruthGuard Web E2E Testing CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  web-tests:
+    name: Run Selenium E2E Web Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Web App Dependencies
+        run: |
+          cd web-app
+          npm install
+
+      - name: Install Selenium Dependencies
+        run: |
+          cd selenium-testing
+          npm install
+
+      - name: Run Selenium E2E Web Tests
+        run: |
+          cd selenium-testing
+          node test.js
+
+      - name: Upload Selenium Excel Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Selenium-Web-Test-Report
+          path: selenium-testing/Selenium_Test_Report.xlsx

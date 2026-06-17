@@ -1,0 +1,13 @@
+{
+  "name": "truth-guard-web",
+  "version": "1.0.0",
+  "description": "TruthGuard Web Application",
+  "main": "server.js",
+  "dependencies": {
+    "express": "^4.19.2",
+    "firebase": "^10.12.2"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TruthGuard - AI Powered Fake News Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="logo-area">
+        <span class="logo-icon">🛡️</span>
+        <span class="logo-text">TRUTHGUARD</span>
+      </div>
+      <nav class="nav-links">
+        <a href="#" class="nav-item active" id="nav-home">
+          <span class="nav-icon">🏠</span>
+          <span class="nav-label">Home</span>
+        </a>
+        <a href="#" class="nav-item" id="nav-verify">
+          <span class="nav-icon">🔍</span>
+          <span class="nav-label">Verify News</span>
+        </a>
+        <a href="#" class="nav-item" id="nav-trending">
+          <span class="nav-icon">📰</span>
+          <span class="nav-label">Trending News</span>
+        </a>
+        <a href="#" class="nav-item" id="nav-dashboard">
+          <span class="nav-icon">📊</span>
+          <span class="nav-label">Dashboard</span>
+        </a>
+        <a href="#" class="nav-item" id="nav-about">
+          <span class="nav-icon">ℹ️</span>
+          <span class="nav-label">About</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="version-label">Version 1.0</span>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Screen: Home -->
+      <section id="screen-home" class="screen-section active">
+        <div class="hero-container">
+          <div class="shield-badge">🛡️</div>
+          <h1 class="hero-title">TRUTHGUARD</h1>
+          <p class="hero-subtitle">AI Powered Fake News Detection</p>
+          
+          <div class="quick-actions-card glass-card">
+            <h3>Quick Actions</h3>
+            <div class="actions-grid">
+              <button class="action-btn primary-btn" id="btn-goto-verify">
+                <span class="btn-emoji">🔍</span> Verify News
+              </button>
+              <button class="action-btn" id="btn-goto-trending">
+                <span class="btn-emoji">📰</span> Trending News
+              </button>
+              <button class="action-btn" id="btn-goto-dashboard">
+                <span class="btn-emoji">📊</span> View Dashboard
+              </button>
+              <button class="action-btn" id="btn-goto-about">
+                <span class="btn-emoji">ℹ️</span> About Us
+              </button>
+            </div>
+          </div>
+
+          <div class="mini-stats-row">
+            <div class="mini-stat-card glass-card">
+              <span class="mini-stat-num" id="stat-quick-verified">25</span>
+              <span class="mini-stat-label">Verified Articles</span>
+            </div>
+            <div class="mini-stat-card glass-card">
+              <span class="mini-stat-num" id="stat-quick-accuracy">92%</span>
+              <span class="mini-stat-label">System Accuracy</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen: Verify News -->
+      <section id="screen-verify" class="screen-section">
+        <div class="section-header">
+          <h2 class="section-title text-gradient">Verify News</h2>
+          <p class="section-desc">Paste news articles, headlines, or claims below to analyze their credibility using AI algorithms.</p>
+        </div>
+
+        <div class="verify-container">
+          <div class="input-card glass-card">
+            <div class="form-group">
+              <label for="news-input">Paste News Here</label>
+              <textarea id="news-input" placeholder="Type or paste the news content you wish to verify..."></textarea>
+            </div>
+            <button id="analyze-btn" class="analyze-btn">Analyze</button>
+          </div>
+
+          <!-- Result Area -->
+          <div id="result-card" class="result-card glass-card hidden">
+            <h3 class="result-header">Analysis Result</h3>
+            <div id="result-title" class="result-title"></div>
+            <div id="result-confidence" class="result-confidence"></div>
+            <hr class="divider">
+            <div id="result-recommendation" class="result-recommendation"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen: Trending News -->
+      <section id="screen-trending" class="screen-section">
+        <div class="section-header">
+          <h2 class="section-title text-gradient">📰 Trending News</h2>
+          <p class="section-desc">Latest highly-discussed topics and validated world news events.</p>
+        </div>
+        <div class="trending-list" id="trending-list-container">
+          <!-- Dynamic loading via JS -->
+        </div>
+      </section>
+
+      <!-- Screen: Dashboard -->
+      <section id="screen-dashboard" class="screen-section">
+        <div class="section-header text-center">
+          <h2 class="section-title text-gradient">📊 Dashboard</h2>
+          <p class="section-desc">Real-time statistics of verified news articles and platform reliability metrics.</p>
+        </div>
+        
+        <div class="stats-grid">
+          <div class="stat-card glass-card">
+            <div class="stat-icon">📚</div>
+            <div class="stat-value" id="dashboard-total">25</div>
+            <div class="stat-label">Articles Verified</div>
+          </div>
+          <div class="stat-card glass-card">
+            <div class="stat-icon text-success">✅</div>
+            <div class="stat-value text-success" id="dashboard-true">18</div>
+            <div class="stat-label">True News</div>
+          </div>
+          <div class="stat-card glass-card">
+            <div class="stat-icon text-danger">❌</div>
+            <div class="stat-value text-danger" id="dashboard-fake">7</div>
+            <div class="stat-label">Fake News</div>
+          </div>
+          <div class="stat-card glass-card">
+            <div class="stat-icon text-info">🎯</div>
+            <div class="stat-value text-info" id="dashboard-accuracy">92%</div>
+            <div class="stat-label">System Accuracy</div>
+          </div>
+        </div>
+
+        <div class="dashboard-details glass-card">
+          <h3>Recent Database Logins & Syncs</h3>
+          <p>Database Source: Cloud Firestore</p>
+          <div class="sync-status">
+            <span class="status-indicator online"></span> Active Live Connection
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen: About -->
+      <section id="screen-about" class="screen-section">
+        <div class="about-container">
+          <div class="about-icon">🛡️</div>
+          <h2 class="about-title">TruthGuard</h2>
+          
+          <div class="about-details glass-card">
+            <h3>System Information</h3>
+            <ul class="about-info-list">
+              <li><strong>Description:</strong> AI Powered Fake News Detection App</li>
+              <li><strong>Version:</strong> 1.0</li>
+              <li><strong>Purpose:</strong> Developed for Educational Purpose</li>
+              <li><strong>Technology Stack:</strong> Node.js, Express, HTML5, Vanilla CSS, JS Engine, Firebase Cloud Firestore</li>
+            </ul>
+          </div>
+          
+          <div class="about-copyright">
+            <p>© TruthGuard 2026</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Firebase Integration Scripts -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>
