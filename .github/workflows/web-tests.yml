@@ -8,35 +8,81 @@ on:
 
 jobs:
   web-tests:
-    name: Run Selenium E2E Web Tests
+    name: 🧪 Run Selenium E2E Tests (135 Test Cases)
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
+      # ── 1. Checkout ─────────────────────────────────────────────────────────
+      - name: 📥 Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      # ── 2. Node.js Setup ────────────────────────────────────────────────────
+      - name: ⚙️ Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install Web App Dependencies
+      # ── 3. Google Chrome ────────────────────────────────────────────────────
+      - name: 🌐 Install Google Chrome
+        run: |
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update -q
+          sudo apt-get install -y google-chrome-stable
+          google-chrome --version
+
+      # ── 4. ChromeDriver ─────────────────────────────────────────────────────
+      - name: 🔧 Install ChromeDriver (matching Chrome version)
+        run: |
+          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
+          CHROMEDRIVER_VERSION=$(curl -sS "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION%%.*}")
+          echo "Chrome: $CHROME_VERSION | ChromeDriver: $CHROMEDRIVER_VERSION"
+          wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
+          unzip -q chromedriver_linux64.zip
+          sudo mv chromedriver /usr/local/bin/
+          sudo chmod +x /usr/local/bin/chromedriver
+          chromedriver --version
+
+      # ── 5. Web App Dependencies ─────────────────────────────────────────────
+      - name: 📦 Install Web App Dependencies
         run: |
           cd web-app
           npm install
 
-      - name: Install Selenium Dependencies
+      # ── 6. Selenium Test Dependencies ───────────────────────────────────────
+      - name: 📦 Install Selenium Test Dependencies
         run: |
           cd selenium-testing
           npm install
 
-      - name: Run Selenium E2E Web Tests
+      # ── 7. Run Tests ────────────────────────────────────────────────────────
+      - name: 🧪 Run Selenium E2E Tests (135 Test Cases)
+        env:
+          DISPLAY: :99
         run: |
           cd selenium-testing
           node test.js
+        continue-on-error: false
 
-      - name: Upload Selenium Excel Report
+      # ── 8. Upload Excel Report ───────────────────────────────────────────────
+      - name: 📊 Upload Excel Test Report
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Selenium-Web-Test-Report
-          path: selenium-testing/Selenium_Test_Report.xlsx
+          name: Selenium_E2E_Report_TruthGuard
+          # Wildcard captures any timestamped filename
+          path: selenium-testing/Selenium_E2E_Report_TruthGuard_*.xlsx
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ── 9. Print Summary ────────────────────────────────────────────────────
+      - name: 📋 Print Test Summary
+        if: always()
+        run: |
+          echo "=============================================="
+          echo "  TruthGuard Selenium E2E - Test Complete"
+          echo "  Report uploaded as GitHub Actions Artifact"
+          echo "  Go to: Actions → This Run → Artifacts"
+          echo "  Download: Selenium_E2E_Report_TruthGuard.zip"
+          echo "=============================================="
+          ls -lh selenium-testing/Selenium_E2E_Report_TruthGuard_*.xlsx 2>/dev/null || echo "No report file found."
