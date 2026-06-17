@@ -1198,6 +1198,67 @@ async function generateReport() {
   return REPORT_FILE;
 }
 
+// ─── MARKDOWN SUMMARY (for GitHub Actions Step Summary) ──────────────────────
+function generateMarkdownSummary() {
+  const passed   = results.filter(r => r.status === 'PASSED').length;
+  const failed   = results.filter(r => r.status === 'FAILED').length;
+  const total    = results.length;
+  const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
+  const duration = ((Date.now() - suiteStart) / 1000).toFixed(1);
+  const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+  const passBadge = passRate === 100 ? '🟢' : passRate >= 80 ? '🟡' : '🔴';
+
+  let md = `# 🛡️ TruthGuard Web — Selenium E2E Test Report\n\n`;
+  md += `> **Generated:** ${timestamp} &nbsp;|&nbsp; **Browser:** Google Chrome (Headless) &nbsp;|&nbsp; **Engine:** Node.js + Selenium WebDriver 4.x\n\n`;
+  md += `---\n\n`;
+
+  // KPI summary table
+  md += `## 📊 Results Summary\n\n`;
+  md += `| ${passBadge} Pass Rate | 📋 Total Tests | ✅ Passed | ❌ Failed | ⏱️ Duration |\n`;
+  md += `|:-----------:|:--------------:|:---------:|:---------:|:----------:|\n`;
+  md += `| **${passRate}%** | **${total}** | **${passed}** | **${failed}** | **${duration}s** |\n\n`;
+
+  // Module breakdown table
+  const modules = [...new Set(results.map(r => r.module))];
+  md += `## 📋 Module Breakdown\n\n`;
+  md += `| Module | Tests | ✅ Passed | ❌ Failed | Pass Rate |\n`;
+  md += `|--------|:-----:|:---------:|:---------:|:---------:|\n`;
+  for (const mod of modules) {
+    const modRes   = results.filter(r => r.module === mod);
+    const mPass    = modRes.filter(r => r.status === 'PASSED').length;
+    const mFail    = modRes.filter(r => r.status === 'FAILED').length;
+    const mRate    = Math.round((mPass / modRes.length) * 100);
+    const mIcon    = mFail === 0 ? '✅' : '❌';
+    md += `| ${mIcon} ${mod} | ${modRes.length} | ${mPass} | ${mFail} | ${mRate}% |\n`;
+  }
+  md += `\n`;
+
+  // Failed tests (if any)
+  const failedList = results.filter(r => r.status === 'FAILED');
+  if (failedList.length > 0) {
+    md += `## ❌ Failed Test Cases\n\n`;
+    md += `| Test ID | Module | Test Name | Error |\n`;
+    md += `|---------|--------|-----------|-------|\n`;
+    for (const r of failedList) {
+      const errSnippet = (r.error || '').replace(/\|/g, '\\|').substring(0, 120);
+      md += `| \`${r.id}\` | ${r.module} | ${r.name} | \`${errSnippet}\` |\n`;
+    }
+    md += `\n`;
+  } else {
+    md += `## 🎉 All Tests Passed!\n\n`;
+    md += `> All **${total}** test cases passed successfully with a **${passRate}%** pass rate.\n\n`;
+  }
+
+  md += `---\n`;
+  md += `*Report also available as a downloadable Excel artifact — see the **Artifacts** section below this run.*\n`;
+
+  const summaryFile = path.join(__dirname, 'test-summary.md');
+  fs.writeFileSync(summaryFile, md, 'utf8');
+  console.log(`\n📝 Markdown summary saved → ${summaryFile}`);
+  return summaryFile;
+}
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('\n═══════════════════════════════════════════════════════════');
@@ -1231,8 +1292,9 @@ async function main() {
     console.log('═══════════════════════════════════════════════════════════');
 
     await generateReport();
+    generateMarkdownSummary();
 
-    console.log('\n✨ Testing complete! Open the .xlsx report for full details.\n');
+    console.log('\n✨ Testing complete! Open the .xlsx report or check the GitHub Actions Summary for full details.\n');
   }
 }
 
