@@ -1,0 +1,13 @@
+{
+  "name": "truth-guard-appium-tests",
+  "version": "1.0.0",
+  "description": "Appium E2E Tests for TruthGuard Web App",
+  "main": "test.js",
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "appium": "^2.0.0"
+  },
+  "scripts": {
+    "test": "node test.js"
+  }
+}
