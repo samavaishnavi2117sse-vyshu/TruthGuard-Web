@@ -1,11 +1,13 @@
 {
   "name": "truth-guard-appium-tests",
   "version": "1.0.0",
-  "description": "Appium E2E Tests for TruthGuard Web App",
+  "description": "Appium E2E Tests for TruthGuard Android Application",
   "main": "test.js",
   "dependencies": {
+    "appium": "^2.19.0",
+    "appium-uiautomator2-driver": "^7.6.2",
     "exceljs": "^4.4.0",
-    "appium": "^2.0.0"
+    "webdriverio": "^9.29.0"
   },
   "scripts": {
     "test": "node test.js"

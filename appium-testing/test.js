@@ -1,24 +1,35 @@
-
 /**
- * TruthGuard Web Application - Appium E2E Test Suite
- * 135 Test Cases covering all modules and user flows
+ * TruthGuard Android Application - Appium E2E Test Suite
+ * 64 Test Cases covering all Compose modules and user flows
  * Report: Appium_E2E_Report_TruthGuard.xlsx
  */
 
-const { Builder, By, until, Key } = require('appium');
-// const chrome = require('appium/chrome'); // Placeholder for Appium driver
+const { remote } = require('webdriverio');
 const ExcelJS = require('exceljs');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const net = require('net');
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const PORT = 3000;
-const BASE_URL = `http://localhost:${PORT}`;
+const APPIUM_PORT = 4723;
+// Use forward slashes — required for WebDriverIO on Windows
+const APK_PATH = 'C:/Users/HP/Projects/TRUTH GUARD/app/build/outputs/apk/debug/app-debug.apk';
 const REPORT_FILE = path.join(__dirname, `Appium_E2E_Report_TruthGuard_${new Date().toISOString().replace(/[:.]/g, '-').slice(0,19)}.xlsx`);
-const WEB_APP_DIR = path.join(__dirname, '../web-app');
+const ADB_PATH = 'C:\\Users\\HP\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe';
+const ANDROID_SDK = 'C:\\Users\\HP\\AppData\\Local\\Android\\Sdk';
 
-let serverProcess = null;
+// ── Inject Android SDK and Java env vars immediately so all child processes inherit them
+process.env.JAVA_HOME = 'C:\\Program Files\\Android\\Android Studio\\jbr';
+process.env.ANDROID_HOME = ANDROID_SDK;
+process.env.ANDROID_SDK_ROOT = ANDROID_SDK;
+process.env.PATH = (process.env.PATH || '') +
+  `;C:\\Program Files\\Android\\Android Studio\\jbr\\bin` +
+  `;${ANDROID_SDK}\\platform-tools` +
+  `;${ANDROID_SDK}\\tools` +
+  `;${ANDROID_SDK}\\emulator`;
+
+let appiumProcess = null;
 let driver = null;
 const results = [];
 let suiteStart = Date.now();
@@ -56,9 +67,30 @@ function record(module, id, name, desc, status, duration, error = '') {
   log(status, id, name, duration, error);
 }
 
+async function dismissSystemAlerts() {
+  try {
+    const dialogTitle = await driver.$('android=new UiSelector().resourceId("android:id/alertTitle")');
+    if (await dialogTitle.isExisting()) {
+      const text = await dialogTitle.getText();
+      if (text.includes("responding") || text.includes("System UI")) {
+        console.log('⚠️ System UI alert detected. Dismissing...');
+        const waitBtn = await driver.$('android=new UiSelector().resourceId("android:id/aerr_wait")');
+        if (await waitBtn.isExisting()) {
+          await waitBtn.click();
+          console.log('   Clicked "Wait" button.');
+          await driver.pause(1000);
+        }
+      }
+    }
+  } catch (e) {
+    // Ignore any errors during dismissal check
+  }
+}
+
 async function tc(module, id, name, desc, fn) {
   const t0 = Date.now();
   try {
+    await dismissSystemAlerts();
     await fn();
     record(module, id, name, desc, 'PASSED', Date.now() - t0);
   } catch (e) {
@@ -66,859 +98,601 @@ async function tc(module, id, name, desc, fn) {
   }
 }
 
-async function navigateTo(screen) {
-  const navId = { home: 'nav-home', verify: 'nav-verify', trending: 'nav-trending', dashboard: 'nav-dashboard', about: 'nav-about' }[screen];
-  await driver.findElement(By.id(navId)).click();
-  await driver.sleep(400);
-}
-
-async function goHome() {
-  await driver.get(BASE_URL);
-  await driver.sleep(800);
-}
-
-async function analyzeNews(text) {
-  await navigateTo('verify');
-  const input = await driver.findElement(By.id('news-input'));
-  await input.clear();
-  await input.sendKeys(text);
-  await driver.findElement(By.id('analyze-btn')).click();
-  await driver.sleep(500);
-}
-
-// ─── SERVER ───────────────────────────────────────────────────────────────────
-function startServer() {
+function runCmd(cmd) {
   return new Promise((resolve) => {
-    console.log('\n🚀 Starting TruthGuard Web Server...');
-    serverProcess = spawn('node', [path.join(WEB_APP_DIR, 'server.js')], {
-      env: { ...process.env, PORT },
+    exec(cmd, (err, stdout) => {
+      if (err) resolve('');
+      else resolve(stdout.trim());
     });
-    serverProcess.stdout.on('data', (d) => {
-      process.stdout.write(`  [server] ${d}`);
-      if (d.toString().includes('running on')) resolve();
-    });
-    serverProcess.stderr.on('data', (d) => process.stderr.write(`  [server-err] ${d}`));
-    setTimeout(resolve, 8000);
   });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  TEST SUITES
-// ═══════════════════════════════════════════════════════════════════════════════
-async function runTests() {
-  const opts = new chrome.Options()
-    .addArguments('--headless=new', '--no-sandbox', '--disable-gpu',
-                  '--disable-dev-shm-usage', '--window-size=1400,900');
-
-  console.log('\n🧪 Initializing Chrome WebDriver (headless)...');
-  driver = await new Builder().forBrowser('chrome').setChromeOptions(opts).build();
-
-  // ── MODULE 1: PAGE LOAD & GLOBAL STRUCTURE (TC-001 – TC-012) ──────────────
-  console.log('\n📋 MODULE 1: Page Load & Global Structure');
-  await goHome();
-
-  await tc('Page Load', 'TC-001', 'App loads successfully', 'Navigate to BASE_URL and expect no errors', async () => {
-    const url = await driver.getCurrentUrl();
-    if (!url.startsWith(BASE_URL)) throw new Error(`Unexpected URL: ${url}`);
-  });
-
-  await tc('Page Load', 'TC-002', 'Browser tab title correct', 'Title must contain TruthGuard', async () => {
-    const title = await driver.getTitle();
-    if (!title.includes('TruthGuard')) throw new Error(`Got title: "${title}"`);
-  });
-
-  await tc('Page Load', 'TC-003', 'Sidebar exists in DOM', 'aside.sidebar element present', async () => {
-    await driver.findElement(By.css('aside.sidebar'));
-  });
-
-  await tc('Page Load', 'TC-004', 'Main content area exists', 'main.main-content element present', async () => {
-    await driver.findElement(By.css('main.main-content'));
-  });
-
-  await tc('Page Load', 'TC-005', 'App container wraps layout', 'div.app-container present', async () => {
-    await driver.findElement(By.css('div.app-container'));
-  });
-
-  await tc('Page Load', 'TC-006', 'All 5 screens exist in DOM', 'All screen-* sections present', async () => {
-    const ids = ['screen-home','screen-verify','screen-trending','screen-dashboard','screen-about'];
-    for (const id of ids) await driver.findElement(By.id(id));
-  });
-
-  await tc('Page Load', 'TC-007', 'Home screen active on load', '#screen-home has "active" class', async () => {
-    const cls = await driver.findElement(By.id('screen-home')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error(`Home screen not active. Classes: ${cls}`);
-  });
-
-  await tc('Page Load', 'TC-008', 'Only one screen active on load', 'Exactly 1 screen-section has active class', async () => {
-    const actives = await driver.findElements(By.css('.screen-section.active'));
-    if (actives.length !== 1) throw new Error(`Expected 1 active screen, got ${actives.length}`);
-  });
-
-  await tc('Page Load', 'TC-009', 'Page has viewport meta tag', 'Responsive meta tag present', async () => {
-    const meta = await driver.findElement(By.css('meta[name="viewport"]'));
-    const content = await meta.getAttribute('content');
-    if (!content.includes('width=device-width')) throw new Error('Viewport meta incorrect');
-  });
-
-  await tc('Page Load', 'TC-010', 'Google Fonts linked', 'Outfit/Jakarta Sans font stylesheet present', async () => {
-    const links = await driver.findElements(By.css('link[href*="fonts.googleapis.com"]'));
-    if (links.length === 0) throw new Error('No Google Fonts link found');
-  });
-
-  await tc('Page Load', 'TC-011', 'CSS stylesheet linked', 'style.css link present', async () => {
-    const link = await driver.findElement(By.css('link[href="style.css"]'));
-    if (!link) throw new Error('style.css not linked');
-  });
-
-  await tc('Page Load', 'TC-012', 'JS app module linked', 'app.js script module present', async () => {
-    const script = await driver.findElement(By.css('script[src="app.js"]'));
-    if (!script) throw new Error('app.js script not found');
-  });
-
-  // ── MODULE 2: SIDEBAR NAVIGATION (TC-013 – TC-030) ───────────────────────
-  console.log('\n📋 MODULE 2: Sidebar Navigation');
-  await goHome();
-
-  await tc('Navigation', 'TC-013', 'Sidebar logo icon visible', 'Shield emoji logo area present', async () => {
-    const logo = await driver.findElement(By.css('.logo-area'));
-    if (!await logo.isDisplayed()) throw new Error('Logo area not displayed');
-  });
-
-  await tc('Navigation', 'TC-014', 'Sidebar TRUTHGUARD logo text', '.logo-text contains TRUTHGUARD', async () => {
-    const text = await driver.findElement(By.css('.logo-text')).getText();
-    if (text !== 'TRUTHGUARD') throw new Error(`Got: "${text}"`);
-  });
-
-  await tc('Navigation', 'TC-015', 'Sidebar has 5 nav links', '.nav-links contains 5 a.nav-item elements', async () => {
-    const items = await driver.findElements(By.css('.nav-links a.nav-item'));
-    if (items.length !== 5) throw new Error(`Expected 5, got ${items.length}`);
-  });
-
-  await tc('Navigation', 'TC-016', 'Home nav link present', 'id=nav-home exists', async () => {
-    await driver.findElement(By.id('nav-home'));
-  });
-
-  await tc('Navigation', 'TC-017', 'Verify nav link present', 'id=nav-verify exists', async () => {
-    await driver.findElement(By.id('nav-verify'));
-  });
-
-  await tc('Navigation', 'TC-018', 'Trending nav link present', 'id=nav-trending exists', async () => {
-    await driver.findElement(By.id('nav-trending'));
-  });
-
-  await tc('Navigation', 'TC-019', 'Dashboard nav link present', 'id=nav-dashboard exists', async () => {
-    await driver.findElement(By.id('nav-dashboard'));
-  });
-
-  await tc('Navigation', 'TC-020', 'About nav link present', 'id=nav-about exists', async () => {
-    await driver.findElement(By.id('nav-about'));
-  });
-
-  await tc('Navigation', 'TC-021', 'Home nav active on load', '#nav-home has active class initially', async () => {
-    const cls = await driver.findElement(By.id('nav-home')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error(`nav-home not active: ${cls}`);
-  });
-
-  await tc('Navigation', 'TC-022', 'Click Verify nav → verify screen', 'Verify screen becomes active', async () => {
-    await driver.findElement(By.id('nav-verify')).click();
-    await driver.sleep(400);
-    const cls = await driver.findElement(By.id('screen-verify')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error('Verify screen not active after nav click');
-  });
-
-  await tc('Navigation', 'TC-023', 'Click Trending nav → trending screen', 'Trending screen becomes active', async () => {
-    await driver.findElement(By.id('nav-trending')).click();
-    await driver.sleep(400);
-    const cls = await driver.findElement(By.id('screen-trending')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error('Trending screen not active');
-  });
-
-  await tc('Navigation', 'TC-024', 'Click Dashboard nav → dashboard screen', 'Dashboard screen becomes active', async () => {
-    await driver.findElement(By.id('nav-dashboard')).click();
-    await driver.sleep(400);
-    const cls = await driver.findElement(By.id('screen-dashboard')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error('Dashboard screen not active');
-  });
-
-  await tc('Navigation', 'TC-025', 'Click About nav → about screen', 'About screen becomes active', async () => {
-    await driver.findElement(By.id('nav-about')).click();
-    await driver.sleep(400);
-    const cls = await driver.findElement(By.id('screen-about')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error('About screen not active');
-  });
-
-  await tc('Navigation', 'TC-026', 'Click Home nav returns to home', 'Home screen becomes active again', async () => {
-    await driver.findElement(By.id('nav-home')).click();
-    await driver.sleep(400);
-    const cls = await driver.findElement(By.id('screen-home')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error('Home screen not active after return');
-  });
-
-  await tc('Navigation', 'TC-027', 'Active nav class changes on click', 'nav-verify has active class after click', async () => {
-    await driver.findElement(By.id('nav-verify')).click();
-    await driver.sleep(300);
-    const cls = await driver.findElement(By.id('nav-verify')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error('nav-verify not active after click');
-  });
-
-  await tc('Navigation', 'TC-028', 'Previous nav loses active class', 'nav-home loses active after clicking verify', async () => {
-    const cls = await driver.findElement(By.id('nav-home')).getAttribute('class');
-    if (cls.includes('active')) throw new Error('nav-home still active after navigating away');
-  });
-
-  await tc('Navigation', 'TC-029', 'Only 1 screen active after nav', 'Exactly 1 .screen-section.active after click', async () => {
-    await driver.findElement(By.id('nav-trending')).click();
-    await driver.sleep(300);
-    const actives = await driver.findElements(By.css('.screen-section.active'));
-    if (actives.length !== 1) throw new Error(`${actives.length} screens active`);
-  });
-
-  await tc('Navigation', 'TC-030', 'Sidebar version label visible', '.version-label present in sidebar footer', async () => {
-    const el = await driver.findElement(By.css('.sidebar-footer .version-label'));
-    const t = await el.getText();
-    if (!t.includes('Version')) throw new Error(`Got: "${t}"`);
-  });
-
-  // ── MODULE 3: HOME SCREEN (TC-031 – TC-050) ───────────────────────────────
-  console.log('\n📋 MODULE 3: Home Screen');
-  await goHome();
-
-  await tc('Home', 'TC-031', 'Hero shield badge visible', '.shield-badge emoji element present', async () => {
-    const el = await driver.findElement(By.css('.shield-badge'));
-    if (!await el.isDisplayed()) throw new Error('Shield badge not visible');
-  });
-
-  await tc('Home', 'TC-032', 'Hero title "TRUTHGUARD" visible', 'h1.hero-title text is TRUTHGUARD', async () => {
-    const t = await driver.findElement(By.css('h1.hero-title')).getText();
-    if (t !== 'TRUTHGUARD') throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Home', 'TC-033', 'Hero subtitle visible', '.hero-subtitle contains AI Powered', async () => {
-    const t = await driver.findElement(By.css('.hero-subtitle')).getText();
-    if (!t.includes('AI Powered')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Home', 'TC-034', 'Quick Actions card visible', '.quick-actions-card.glass-card present', async () => {
-    const el = await driver.findElement(By.css('.quick-actions-card'));
-    if (!await el.isDisplayed()) throw new Error('Quick actions card not visible');
-  });
-
-  await tc('Home', 'TC-035', 'Quick Actions heading text', 'h3 inside quick-actions-card says "Quick Actions"', async () => {
-    const t = await driver.findElement(By.css('.quick-actions-card h3')).getText();
-    if (!t.includes('Quick Actions')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Home', 'TC-036', '"Verify News" quick button exists', '#btn-goto-verify present', async () => {
-    await driver.findElement(By.id('btn-goto-verify'));
-  });
-
-  await tc('Home', 'TC-037', '"Trending News" quick button exists', '#btn-goto-trending present', async () => {
-    await driver.findElement(By.id('btn-goto-trending'));
-  });
-
-  await tc('Home', 'TC-038', '"View Dashboard" quick button exists', '#btn-goto-dashboard present', async () => {
-    await driver.findElement(By.id('btn-goto-dashboard'));
-  });
-
-  await tc('Home', 'TC-039', '"About Us" quick button exists', '#btn-goto-about present', async () => {
-    await driver.findElement(By.id('btn-goto-about'));
-  });
-
-  await tc('Home', 'TC-040', 'Mini stats row visible', '.mini-stats-row present on home', async () => {
-    const el = await driver.findElement(By.css('.mini-stats-row'));
-    if (!await el.isDisplayed()) throw new Error('Mini stats row not displayed');
-  });
-
-  await tc('Home', 'TC-041', 'Home shows 2 mini stat cards', '.mini-stat-card count is 2', async () => {
-    const cards = await driver.findElements(By.css('.mini-stat-card'));
-    if (cards.length !== 2) throw new Error(`Got ${cards.length} mini stat cards`);
-  });
-
-  await tc('Home', 'TC-042', '"Verified Articles" stat label visible', 'stat-quick-verified element present', async () => {
-    await driver.findElement(By.id('stat-quick-verified'));
-  });
-
-  await tc('Home', 'TC-043', 'Initial verified count is 25', '#stat-quick-verified text is "25"', async () => {
-    const t = await driver.findElement(By.id('stat-quick-verified')).getText();
-    if (t !== '25') throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Home', 'TC-044', '"System Accuracy" stat visible', '#stat-quick-accuracy element present', async () => {
-    await driver.findElement(By.id('stat-quick-accuracy'));
-  });
-
-  await tc('Home', 'TC-045', 'Initial system accuracy is 92%', '#stat-quick-accuracy text is "92%"', async () => {
-    const t = await driver.findElement(By.id('stat-quick-accuracy')).getText();
-    if (t !== '92%') throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Home', 'TC-046', 'Quick btn "Verify News" navigates to verify', 'btn-goto-verify click activates verify screen', async () => {
-    await driver.findElement(By.id('btn-goto-verify')).click();
-    await driver.sleep(400);
-    const cls = await driver.findElement(By.id('screen-verify')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error('Verify screen not active after quick btn click');
-  });
-
-  await goHome();
-  await tc('Home', 'TC-047', 'Quick btn "Trending News" navigates', 'btn-goto-trending click activates trending screen', async () => {
-    await driver.findElement(By.id('btn-goto-trending')).click();
-    await driver.sleep(400);
-    const cls = await driver.findElement(By.id('screen-trending')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error('Trending screen not active after quick btn click');
-  });
-
-  await goHome();
-  await tc('Home', 'TC-048', 'Quick btn "View Dashboard" navigates', 'btn-goto-dashboard click activates dashboard', async () => {
-    await driver.findElement(By.id('btn-goto-dashboard')).click();
-    await driver.sleep(400);
-    const cls = await driver.findElement(By.id('screen-dashboard')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error('Dashboard screen not active after quick btn click');
-  });
-
-  await goHome();
-  await tc('Home', 'TC-049', 'Quick btn "About Us" navigates', 'btn-goto-about click activates about screen', async () => {
-    await driver.findElement(By.id('btn-goto-about')).click();
-    await driver.sleep(400);
-    const cls = await driver.findElement(By.id('screen-about')).getAttribute('class');
-    if (!cls.includes('active')) throw new Error('About screen not active after quick btn click');
-  });
-
-  await tc('Home', 'TC-050', 'Sidebar visible on all screens', 'sidebar visible on about screen', async () => {
-    const sidebar = await driver.findElement(By.css('aside.sidebar'));
-    if (!await sidebar.isDisplayed()) throw new Error('Sidebar hidden on about screen');
-  });
-
-  // ── MODULE 4: VERIFY NEWS SCREEN (TC-051 – TC-085) ───────────────────────
-  console.log('\n📋 MODULE 4: Verify News Screen');
-  await goHome();
-  await navigateTo('verify');
-
-  await tc('Verify', 'TC-051', 'Verify screen section exists', 'id=screen-verify in DOM', async () => {
-    await driver.findElement(By.id('screen-verify'));
-  });
-
-  await tc('Verify', 'TC-052', '"Verify News" heading visible', 'h2.section-title contains Verify News', async () => {
-    const t = await driver.findElement(By.css('#screen-verify h2.section-title')).getText();
-    if (!t.includes('Verify')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-053', 'Verify screen description visible', '.section-desc text present', async () => {
-    const t = await driver.findElement(By.css('#screen-verify .section-desc')).getText();
-    if (!t || t.length < 10) throw new Error('Description too short or missing');
-  });
-
-  await tc('Verify', 'TC-054', 'Input card (glass card) visible', '.input-card.glass-card present', async () => {
-    await driver.findElement(By.css('.input-card'));
-  });
-
-  await tc('Verify', 'TC-055', 'Textarea element exists', 'id=news-input textarea present', async () => {
-    const el = await driver.findElement(By.id('news-input'));
-    const tag = await el.getTagName();
-    if (tag !== 'textarea') throw new Error(`Expected textarea, got ${tag}`);
-  });
-
-  await tc('Verify', 'TC-056', 'Textarea has placeholder text', 'placeholder attribute is set', async () => {
-    const ph = await driver.findElement(By.id('news-input')).getAttribute('placeholder');
-    if (!ph || ph.length < 5) throw new Error(`Placeholder missing or too short: "${ph}"`);
-  });
-
-  await tc('Verify', 'TC-057', '"Paste News Here" label exists', 'label for news-input present', async () => {
-    const t = await driver.findElement(By.css('label[for="news-input"]')).getText();
-    if (!t.includes('Paste')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-058', 'Analyze button exists', 'id=analyze-btn button present', async () => {
-    await driver.findElement(By.id('analyze-btn'));
-  });
-
-  await tc('Verify', 'TC-059', 'Analyze button text is "Analyze"', 'button text matches', async () => {
-    const t = await driver.findElement(By.id('analyze-btn')).getText();
-    if (t !== 'Analyze') throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-060', 'Result card hidden initially', '#result-card has "hidden" class on load', async () => {
-    const cls = await driver.findElement(By.id('result-card')).getAttribute('class');
-    if (!cls.includes('hidden')) throw new Error(`result-card not hidden. Classes: ${cls}`);
-  });
-
-  await tc('Verify', 'TC-061', 'Empty submit triggers alert', 'alert shown when no text entered', async () => {
-    const input = await driver.findElement(By.id('news-input'));
-    await input.clear();
-    await driver.findElement(By.id('analyze-btn')).click();
-    await driver.sleep(300);
-    try {
-      const alert = await driver.switchTo().alert();
-      const alertText = await alert.getText();
-      await alert.accept();
-      if (!alertText) throw new Error('Alert text was empty');
-    } catch (e) {
-      if (e.name === 'NoAlertOpenError' || e.message.includes('no such alert')) {
-        throw new Error('No alert appeared for empty submission');
-      }
-      throw e;
-    }
-  });
-
-  // Fake keyword tests
-  const fakeKeywords = ['fake', 'hoax', 'rumor', 'clickbait', 'shocking'];
-  const tcIds = ['TC-062','TC-063','TC-064','TC-065','TC-066'];
-  for (let i = 0; i < fakeKeywords.length; i++) {
-    const kw = fakeKeywords[i];
-    const id = tcIds[i];
-    await tc('Verify', id, `Keyword "${kw}" triggers Fake result`, `Input containing "${kw}" → Likely Fake News`, async () => {
-      await goHome();
-      await analyzeNews(`This is a ${kw} news story about something`);
-      const t = await driver.findElement(By.id('result-title')).getText();
-      if (!t.includes('Likely Fake')) throw new Error(`Got: "${t}"`);
+function checkPort(port) {
+  return new Promise((resolve) => {
+    const client = new net.Socket();
+    client.connect(port, '127.0.0.1', () => {
+      client.destroy();
+      resolve(true);
     });
+    client.on('error', () => {
+      resolve(false);
+    });
+  });
+}
+
+async function getElByText(text) {
+  await dismissSystemAlerts();
+  return await driver.$(`android=new UiSelector().textContains("${text}")`);
+}
+
+async function clickText(text) {
+  await dismissSystemAlerts();
+  const el = await getElByText(text);
+  await el.waitForExist({ timeout: 10000 });
+  await el.click();
+  await driver.pause(1000);
+}
+
+async function goBack() {
+  await dismissSystemAlerts();
+  await driver.back();
+  await driver.pause(1000);
+}
+
+async function assertTextPresent(text) {
+  await dismissSystemAlerts();
+  const el = await driver.$(`android=new UiSelector().textContains("${text}")`);
+  const exist = await el.isExisting();
+  if (!exist) throw new Error(`Text "${text}" not found on screen`);
+}
+
+// ─── APPIUM SERVER & EMULATOR LIFECYCLE ───────────────────────────────────────
+async function startAppiumServer() {
+  if (await checkPort(APPIUM_PORT)) {
+    console.log(`📡 Appium server already running on port ${APPIUM_PORT}. Reusing.`);
+    // Kill and restart to ensure it has ANDROID_HOME in its env
+    return;
+  }
+  console.log('⏳ Spawning Appium server...');
+  appiumProcess = spawn('node', [
+    path.join(__dirname, 'node_modules', 'appium', 'build', 'lib', 'main.js'),
+    '--port', APPIUM_PORT.toString()
+  ], {
+    shell: false,
+    stdio: 'pipe',
+    env: { ...process.env }  // inherits ANDROID_HOME we set above
+  });
+
+  appiumProcess.stdout.on('data', (data) => {
+    process.stdout.write(`[Appium] ${data}`);
+  });
+  appiumProcess.stderr.on('data', (data) => {
+    process.stderr.write(`[Appium ERR] ${data}`);
+  });
+
+  let appiumReady = false;
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    if (await checkPort(APPIUM_PORT)) {
+      appiumReady = true;
+      break;
+    }
   }
 
-  await tc('Verify', 'TC-067', 'Fake result confidence is 88%', 'result-confidence contains 88%', async () => {
-    await goHome();
-    await analyzeNews('This story is total fake and misleading');
-    const t = await driver.findElement(By.id('result-confidence')).getText();
-    if (!t.includes('88%')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-068', 'Fake result recommendation exists', 'result-recommendation contains "trusted sources"', async () => {
-    const t = await driver.findElement(By.id('result-recommendation')).getText();
-    if (!t.toLowerCase().includes('trusted')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-069', 'Genuine news shows "Likely Genuine News"', 'neutral text → Likely Genuine News', async () => {
-    await goHome();
-    await analyzeNews('NASA scientists have launched a new satellite to monitor climate change worldwide.');
-    const t = await driver.findElement(By.id('result-title')).getText();
-    if (!t.includes('Likely Genuine')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-070', 'Genuine result confidence is 94%', 'result-confidence contains 94%', async () => {
-    const t = await driver.findElement(By.id('result-confidence')).getText();
-    if (!t.includes('94%')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-071', 'Genuine recommendation says "appears reliable"', 'recommendation text verified', async () => {
-    const t = await driver.findElement(By.id('result-recommendation')).getText();
-    if (!t.toLowerCase().includes('reliable')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-072', 'Result card visible after analysis', 'result-card loses hidden class', async () => {
-    const cls = await driver.findElement(By.id('result-card')).getAttribute('class');
-    if (cls.includes('hidden')) throw new Error('Result card still hidden after analysis');
-  });
-
-  await tc('Verify', 'TC-073', '"Analysis Result" heading in card', 'h3.result-header contains Analysis Result', async () => {
-    const t = await driver.findElement(By.css('#result-card h3.result-header')).getText();
-    if (!t.includes('Analysis Result')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-074', 'Result title element exists', 'id=result-title in DOM', async () => {
-    await driver.findElement(By.id('result-title'));
-  });
-
-  await tc('Verify', 'TC-075', 'Result confidence element exists', 'id=result-confidence in DOM', async () => {
-    await driver.findElement(By.id('result-confidence'));
-  });
-
-  await tc('Verify', 'TC-076', 'Result recommendation element exists', 'id=result-recommendation in DOM', async () => {
-    await driver.findElement(By.id('result-recommendation'));
-  });
-
-  await tc('Verify', 'TC-077', 'Result card has divider element', 'hr.divider inside result-card', async () => {
-    await driver.findElement(By.css('#result-card hr.divider'));
-  });
-
-  await tc('Verify', 'TC-078', 'UPPERCASE fake keyword detected', '"FAKE" (uppercase) triggers Likely Fake', async () => {
-    await goHome();
-    await analyzeNews('THIS IS TOTALLY FAKE AND MISLEADING');
-    const t = await driver.findElement(By.id('result-title')).getText();
-    if (!t.includes('Likely Fake')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-079', 'Mixed-case keyword detected', '"FaKe" triggers Likely Fake', async () => {
-    await goHome();
-    await analyzeNews('This news is FaKe and dangerous');
-    const t = await driver.findElement(By.id('result-title')).getText();
-    if (!t.includes('Likely Fake')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-080', 'Keyword at end of long text detected', 'Fake keyword at end still triggers', async () => {
-    await goHome();
-    await analyzeNews('A very long news article about many things happening in the world today and tomorrow and after that, but it is ultimately fake');
-    const t = await driver.findElement(By.id('result-title')).getText();
-    if (!t.includes('Likely Fake')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Verify', 'TC-081', 'Re-analyze with new text works', 'Second analysis clears and updates result', async () => {
-    await goHome();
-    await analyzeNews('Real scientific discovery announced by researchers');
-    const t1 = await driver.findElement(By.id('result-title')).getText();
-    await driver.findElement(By.id('news-input')).clear();
-    await driver.findElement(By.id('news-input')).sendKeys('This is a shocking hoax story');
-    await driver.findElement(By.id('analyze-btn')).click();
-    await driver.sleep(500);
-    const t2 = await driver.findElement(By.id('result-title')).getText();
-    if (t1 === t2) throw new Error('Result did not change on second analysis');
-  });
-
-  await tc('Verify', 'TC-082', 'Fake stat increments in dashboard', 'After fake analysis, dashboard-fake count increases', async () => {
-    await navigateTo('dashboard');
-    await driver.sleep(300);
-    const initial = parseInt(await driver.findElement(By.id('dashboard-fake')).getText());
-    // Use navigateTo (not goHome) to avoid page reload which resets in-memory stats
-    await navigateTo('verify');
-    const input = await driver.findElement(By.id('news-input'));
-    await input.clear();
-    await input.sendKeys('More shocking rumors in today news story');
-    await driver.findElement(By.id('analyze-btn')).click();
-    await driver.sleep(500);
-    await navigateTo('dashboard');
-    await driver.sleep(300);
-    const updated = parseInt(await driver.findElement(By.id('dashboard-fake')).getText());
-    if (updated <= initial) throw new Error(`Fake count not incremented: ${initial} → ${updated}`);
-  });
-
-  await tc('Verify', 'TC-083', 'True stat increments in dashboard', 'After genuine analysis, dashboard-true count increases', async () => {
-    await navigateTo('dashboard');
-    await driver.sleep(300);
-    const initial = parseInt(await driver.findElement(By.id('dashboard-true')).getText());
-    // Use navigateTo (not goHome) to avoid page reload which resets in-memory stats
-    await navigateTo('verify');
-    const inp = await driver.findElement(By.id('news-input'));
-    await inp.clear();
-    await inp.sendKeys('Scientists confirm water found on Mars surface officially');
-    await driver.findElement(By.id('analyze-btn')).click();
-    await driver.sleep(500);
-    await navigateTo('dashboard');
-    await driver.sleep(300);
-    const updated = parseInt(await driver.findElement(By.id('dashboard-true')).getText());
-    if (updated <= initial) throw new Error(`True count not incremented: ${initial} → ${updated}`);
-  });
-
-  await tc('Verify', 'TC-084', 'Total verified increments in dashboard', 'dashboard-total increases after analysis', async () => {
-    await navigateTo('dashboard');
-    await driver.sleep(300);
-    const initial = parseInt(await driver.findElement(By.id('dashboard-total')).getText());
-    // Use navigateTo (not goHome) to avoid page reload which resets in-memory stats
-    await navigateTo('verify');
-    const input = await driver.findElement(By.id('news-input'));
-    await input.clear();
-    await input.sendKeys('Climate report shows record temperatures worldwide in 2026');
-    await driver.findElement(By.id('analyze-btn')).click();
-    await driver.sleep(500);
-    await navigateTo('dashboard');
-    await driver.sleep(300);
-    const updated = parseInt(await driver.findElement(By.id('dashboard-total')).getText());
-    if (updated <= initial) throw new Error(`Total not incremented: ${initial} → ${updated}`);
-  });
-
-  await tc('Verify', 'TC-085', 'Home mini-stats update after analysis', 'stat-quick-verified increases after analysis', async () => {
-    await goHome();
-    const initial = parseInt(await driver.findElement(By.id('stat-quick-verified')).getText());
-    await analyzeNews('Scientific breakthrough in renewable energy technology');
-    await navigateTo('home');
-    await driver.sleep(300);
-    const updated = parseInt(await driver.findElement(By.id('stat-quick-verified')).getText());
-    if (updated <= initial) throw new Error(`Home stat not updated: ${initial} → ${updated}`);
-  });
-
-  // ── MODULE 5: TRENDING NEWS SCREEN (TC-086 – TC-100) ─────────────────────
-  console.log('\n📋 MODULE 5: Trending News Screen');
-  await goHome();
-  await navigateTo('trending');
-
-  await tc('Trending', 'TC-086', 'Trending screen section exists', 'id=screen-trending in DOM', async () => {
-    await driver.findElement(By.id('screen-trending'));
-  });
-
-  await tc('Trending', 'TC-087', '"📰 Trending News" heading visible', 'h2.section-title contains Trending News', async () => {
-    const t = await driver.findElement(By.css('#screen-trending h2.section-title')).getText();
-    if (!t.includes('Trending')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Trending', 'TC-088', 'Trending description text present', '.section-desc text exists and has content', async () => {
-    const t = await driver.findElement(By.css('#screen-trending .section-desc')).getText();
-    if (!t || t.length < 5) throw new Error('Description missing');
-  });
-
-  await tc('Trending', 'TC-089', 'Trending list container exists', 'id=trending-list-container present', async () => {
-    await driver.findElement(By.id('trending-list-container'));
-  });
-
-  await tc('Trending', 'TC-090', 'Exactly 5 news cards rendered', '.news-card count is 5', async () => {
-    const cards = await driver.findElements(By.css('.news-card'));
-    if (cards.length !== 5) throw new Error(`Expected 5 cards, got ${cards.length}`);
-  });
-
-  await tc('Trending', 'TC-091', 'News cards have glass-card class', 'All cards have glass-card styling', async () => {
-    const cards = await driver.findElements(By.css('.news-card.glass-card'));
-    if (cards.length !== 5) throw new Error(`Expected 5 glass cards, got ${cards.length}`);
-  });
-
-  await tc('Trending', 'TC-092', 'BBC news card present', 'Source text "BBC" visible in trending list', async () => {
-    const sources = await driver.findElements(By.css('.news-source'));
-    const texts = await Promise.all(sources.map(s => s.getText()));
-    if (!texts.some(t => t.includes('BBC'))) throw new Error('BBC source not found');
-  });
-
-  await tc('Trending', 'TC-093', 'Reuters news card present', 'Source text "Reuters" visible', async () => {
-    const sources = await driver.findElements(By.css('.news-source'));
-    const texts = await Promise.all(sources.map(s => s.getText()));
-    if (!texts.some(t => t.includes('Reuters'))) throw new Error('Reuters not found');
-  });
-
-  await tc('Trending', 'TC-094', 'NASA news card present', 'Source text "NASA" visible', async () => {
-    const sources = await driver.findElements(By.css('.news-source'));
-    const texts = await Promise.all(sources.map(s => s.getText()));
-    if (!texts.some(t => t.includes('NASA'))) throw new Error('NASA not found');
-  });
-
-  await tc('Trending', 'TC-095', 'Bloomberg news card present', 'Source text "Bloomberg" visible', async () => {
-    const sources = await driver.findElements(By.css('.news-source'));
-    const texts = await Promise.all(sources.map(s => s.getText()));
-    if (!texts.some(t => t.includes('Bloomberg'))) throw new Error('Bloomberg not found');
-  });
-
-  await tc('Trending', 'TC-096', 'UNESCO news card present', 'Source text "UNESCO" visible', async () => {
-    const sources = await driver.findElements(By.css('.news-source'));
-    const texts = await Promise.all(sources.map(s => s.getText()));
-    if (!texts.some(t => t.includes('UNESCO'))) throw new Error('UNESCO not found');
-  });
-
-  await tc('Trending', 'TC-097', '1st card title correct', '"Scientists discover" in 1st card', async () => {
-    const titles = await driver.findElements(By.css('.news-title'));
-    const t = await titles[0].getText();
-    if (!t.includes('Scientists discover')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Trending', 'TC-098', '2nd card title correct', '"AI transforming healthcare" in 2nd card', async () => {
-    const titles = await driver.findElements(By.css('.news-title'));
-    const t = await titles[1].getText();
-    if (!t.includes('AI transforming')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Trending', 'TC-099', '3rd card title correct', '"Space mission" in 3rd card', async () => {
-    const titles = await driver.findElements(By.css('.news-title'));
-    const t = await titles[2].getText();
-    if (!t.includes('Space mission')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Trending', 'TC-100', '4th card title correct', '"Global economy" in 4th card', async () => {
-    const titles = await driver.findElements(By.css('.news-title'));
-    const t = await titles[3].getText();
-    if (!t.includes('Global economy')) throw new Error(`Got: "${t}"`);
-  });
-
-  // ── MODULE 6: DASHBOARD SCREEN (TC-101 – TC-115) ─────────────────────────
-  console.log('\n📋 MODULE 6: Dashboard Screen');
-  await goHome();
-  await navigateTo('dashboard');
-
-  await tc('Dashboard', 'TC-101', 'Dashboard screen section exists', 'id=screen-dashboard in DOM', async () => {
-    await driver.findElement(By.id('screen-dashboard'));
-  });
-
-  await tc('Dashboard', 'TC-102', '"📊 Dashboard" heading visible', 'h2 contains Dashboard', async () => {
-    const t = await driver.findElement(By.css('#screen-dashboard h2.section-title')).getText();
-    if (!t.includes('Dashboard')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Dashboard', 'TC-103', 'Dashboard description visible', '.section-desc present with text', async () => {
-    const t = await driver.findElement(By.css('#screen-dashboard .section-desc')).getText();
-    if (!t || t.length < 5) throw new Error('Description missing');
-  });
-
-  await tc('Dashboard', 'TC-104', 'Stats grid has 4 cards', '.stats-grid contains 4 .stat-card elements', async () => {
-    const cards = await driver.findElements(By.css('.stats-grid .stat-card'));
-    if (cards.length !== 4) throw new Error(`Expected 4, got ${cards.length}`);
-  });
-
-  await tc('Dashboard', 'TC-105', '"Articles Verified" label visible', '.stat-label contains Articles Verified', async () => {
-    const labels = await driver.findElements(By.css('.stat-label'));
-    const texts = await Promise.all(labels.map(l => l.getText()));
-    if (!texts.some(t => t.includes('Articles Verified'))) throw new Error('Label not found');
-  });
-
-  await tc('Dashboard', 'TC-106', '"True News" label visible', '.stat-label contains True News', async () => {
-    const labels = await driver.findElements(By.css('.stat-label'));
-    const texts = await Promise.all(labels.map(l => l.getText()));
-    if (!texts.some(t => t.includes('True News'))) throw new Error('True News label not found');
-  });
-
-  await tc('Dashboard', 'TC-107', '"Fake News" label visible', '.stat-label contains Fake News', async () => {
-    const labels = await driver.findElements(By.css('.stat-label'));
-    const texts = await Promise.all(labels.map(l => l.getText()));
-    if (!texts.some(t => t.includes('Fake News'))) throw new Error('Fake News label not found');
-  });
-
-  await tc('Dashboard', 'TC-108', 'Accuracy stat label visible', '.stat-label contains Accuracy', async () => {
-    const labels = await driver.findElements(By.css('.stat-label'));
-    const texts = await Promise.all(labels.map(l => l.getText()));
-    if (!texts.some(t => t.toLowerCase().includes('accuracy'))) throw new Error('Accuracy label not found');
-  });
-
-  await tc('Dashboard', 'TC-109', '#dashboard-total element exists', 'id=dashboard-total present', async () => {
-    await driver.findElement(By.id('dashboard-total'));
-  });
-
-  await tc('Dashboard', 'TC-110', '#dashboard-true element exists', 'id=dashboard-true present', async () => {
-    await driver.findElement(By.id('dashboard-true'));
-  });
-
-  await tc('Dashboard', 'TC-111', '#dashboard-fake element exists', 'id=dashboard-fake present', async () => {
-    await driver.findElement(By.id('dashboard-fake'));
-  });
-
-  await tc('Dashboard', 'TC-112', '#dashboard-accuracy element exists', 'id=dashboard-accuracy present', async () => {
-    await driver.findElement(By.id('dashboard-accuracy'));
-  });
-
-  await tc('Dashboard', 'TC-113', 'Accuracy value ends in %', 'dashboard-accuracy text contains %', async () => {
-    const t = await driver.findElement(By.id('dashboard-accuracy')).getText();
-    if (!t.includes('%')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('Dashboard', 'TC-114', 'Dashboard details card visible', '.dashboard-details.glass-card present', async () => {
-    const el = await driver.findElement(By.css('.dashboard-details'));
-    if (!await el.isDisplayed()) throw new Error('Dashboard details not visible');
-  });
-
-  await tc('Dashboard', 'TC-115', '"Cloud Firestore" text in details', 'Database source text verified', async () => {
-    const t = await driver.findElement(By.css('.dashboard-details')).getText();
-    if (!t.includes('Cloud Firestore')) throw new Error(`Got: "${t}"`);
-  });
-
-  // ── MODULE 7: ABOUT SCREEN (TC-116 – TC-130) ─────────────────────────────
-  console.log('\n📋 MODULE 7: About Screen');
-  await goHome();
-  await navigateTo('about');
-
-  await tc('About', 'TC-116', 'About screen section exists', 'id=screen-about in DOM', async () => {
-    await driver.findElement(By.id('screen-about'));
-  });
-
-  await tc('About', 'TC-117', 'About icon visible', '.about-icon element present and displayed', async () => {
-    const el = await driver.findElement(By.css('.about-icon'));
-    if (!await el.isDisplayed()) throw new Error('About icon not displayed');
-  });
-
-  await tc('About', 'TC-118', '"TruthGuard" about title visible', 'h2.about-title text is TruthGuard', async () => {
-    const t = await driver.findElement(By.css('h2.about-title')).getText();
-    if (t !== 'TruthGuard') throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('About', 'TC-119', 'System Information heading visible', '"System Information" h3 present', async () => {
-    const t = await driver.findElement(By.css('.about-details h3')).getText();
-    if (!t.includes('System Information')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('About', 'TC-120', 'About info list has 4 items', 'ul.about-info-list has 4 li elements', async () => {
-    const items = await driver.findElements(By.css('.about-info-list li'));
-    if (items.length !== 4) throw new Error(`Expected 4 items, got ${items.length}`);
-  });
-
-  await tc('About', 'TC-121', '"AI Powered Fake News Detection App" text', 'Description list item text correct', async () => {
-    const t = await driver.findElement(By.css('.about-details')).getText();
-    if (!t.includes('AI Powered Fake News Detection App')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('About', 'TC-122', 'Version "1.0" visible', 'About info shows Version : 1.0', async () => {
-    const t = await driver.findElement(By.css('.about-details')).getText();
-    if (!t.includes('1.0')) throw new Error(`Version not found in: "${t}"`);
-  });
-
-  await tc('About', 'TC-123', '"Educational Purpose" text visible', 'Purpose list item contains educational', async () => {
-    const t = await driver.findElement(By.css('.about-details')).getText();
-    if (!t.includes('Educational Purpose')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('About', 'TC-124', '"Node.js" in technology stack', 'Tech stack item contains Node.js', async () => {
-    const t = await driver.findElement(By.css('.about-details')).getText();
-    if (!t.includes('Node.js')) throw new Error(`Node.js not in text: "${t}"`);
-  });
-
-  await tc('About', 'TC-125', '"Firebase" in technology stack', 'Tech stack item contains Firebase', async () => {
-    const t = await driver.findElement(By.css('.about-details')).getText();
-    if (!t.includes('Firebase')) throw new Error(`Firebase not in text`);
-  });
-
-  await tc('About', 'TC-126', 'Copyright text visible', '.about-copyright contains TruthGuard 2026', async () => {
-    const t = await driver.findElement(By.css('.about-copyright')).getText();
-    if (!t.includes('TruthGuard 2026')) throw new Error(`Got: "${t}"`);
-  });
-
-  await tc('About', 'TC-127', '"© " copyright symbol present', 'Copyright text has © symbol', async () => {
-    const t = await driver.findElement(By.css('.about-copyright')).getText();
-    if (!t.includes('©')) throw new Error(`Copyright symbol missing: "${t}"`);
-  });
-
-  await tc('About', 'TC-128', 'About details glass card present', '.about-details.glass-card exists', async () => {
-    await driver.findElement(By.css('.about-details'));
-  });
-
-  await tc('About', 'TC-129', '"Description:" label in about list', 'First li has Description: label', async () => {
-    const t = await driver.findElement(By.css('.about-details')).getText();
-    if (!t.includes('Description:')) throw new Error(`Description label missing`);
-  });
-
-  await tc('About', 'TC-130', '"Version:" label in about list', 'Version label present in info list', async () => {
-    const t = await driver.findElement(By.css('.about-details')).getText();
-    if (!t.includes('Version:')) throw new Error(`Version label missing`);
-  });
-
-  // ── MODULE 8: END-TO-END FLOWS (TC-131 – TC-140) ─────────────────────────
-  console.log('\n📋 MODULE 8: End-to-End User Flows');
-
-  await tc('E2E Flow', 'TC-131', 'Full fake news flow: Home→Verify→Dashboard', 'Fake count in dashboard increments', async () => {
-    await goHome();
-    await navigateTo('dashboard');
-    const fakeBefore = parseInt(await driver.findElement(By.id('dashboard-fake')).getText());
-    await goHome();
-    await analyzeNews('Shocking hoax exposed by media today');
-    await navigateTo('dashboard');
-    await driver.sleep(400);
-    const fakeAfter = parseInt(await driver.findElement(By.id('dashboard-fake')).getText());
-    if (fakeAfter <= fakeBefore) throw new Error(`Fake: ${fakeBefore} → ${fakeAfter}`);
-  });
-
-  await tc('E2E Flow', 'TC-132', 'Full genuine flow: Home→Verify→Dashboard', 'True count increments correctly', async () => {
-    await goHome();
-    await navigateTo('dashboard');
-    const trueBefore = parseInt(await driver.findElement(By.id('dashboard-true')).getText());
-    await goHome();
-    await analyzeNews('Medical researchers confirm new treatment for rare disease');
-    await navigateTo('dashboard');
-    await driver.sleep(400);
-    const trueAfter = parseInt(await driver.findElement(By.id('dashboard-true')).getText());
-    if (trueAfter <= trueBefore) throw new Error(`True: ${trueBefore} → ${trueAfter}`);
-  });
-
-  await tc('E2E Flow', 'TC-133', 'Stats consistency: true+fake=total-25', 'Sum matches total minus initial 25', async () => {
-    await goHome();
-    await navigateTo('dashboard');
-    const total = parseInt(await driver.findElement(By.id('dashboard-total')).getText());
-    const trueN = parseInt(await driver.findElement(By.id('dashboard-true')).getText());
-    const fakeN = parseInt(await driver.findElement(By.id('dashboard-fake')).getText());
-    if ((trueN + fakeN) !== total) throw new Error(`${trueN} + ${fakeN} ≠ ${total}`);
-  });
-
-  await tc('E2E Flow', 'TC-134', 'Navigate all 5 screens sequentially', 'All screens activate without error', async () => {
-    await goHome();
-    const navOrder = ['home', 'verify', 'trending', 'dashboard', 'about'];
-    const screenIds = ['screen-home', 'screen-verify', 'screen-trending', 'screen-dashboard', 'screen-about'];
-    for (let i = 0; i < navOrder.length; i++) {
-      await navigateTo(navOrder[i]);
-      const cls = await driver.findElement(By.id(screenIds[i])).getAttribute('class');
-      if (!cls.includes('active')) throw new Error(`${screenIds[i]} not active`);
+  if (!appiumReady) {
+    throw new Error(`Appium server failed to start on port ${APPIUM_PORT}`);
+  }
+  console.log('🚀 Appium server started successfully.');
+}
+
+async function verifyEmulatorBooted() {
+  const adbCall = `"${ADB_PATH}"`;
+  console.log('⏳ Checking if Android device/emulator is online...');
+  
+  // Wait for at least one device to show up in ADB
+  let deviceFound = false;
+  let devices = await runCmd(`${adbCall} devices`);
+  if (devices.includes('\tdevice') || devices.includes('emulator-5554')) {
+    deviceFound = true;
+  }
+
+  if (!deviceFound) {
+    console.log('⏳ No online emulator detected. Launching Pixel_6 AVD...');
+    const emulatorCall = 'C:\\Users\\HP\\AppData\\Local\\Android\\Sdk\\emulator\\emulator.exe';
+    try {
+      const child = spawn(emulatorCall, ['-avd', 'Pixel_6', '-no-snapshot', '-no-boot-anim'], {
+        detached: true,
+        stdio: 'ignore'
+      });
+      child.unref();
+      console.log('   Emulator process spawned. Waiting for ADB registration...');
+    } catch (e) {
+      console.log(`   ⚠️ Failed to spawn emulator programmatically: ${e.message}`);
     }
+
+    // Now wait up to 60 seconds for ADB to see the device
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      devices = await runCmd(`${adbCall} devices`);
+      if (devices.includes('\tdevice') || devices.includes('emulator-5554')) {
+        deviceFound = true;
+        break;
+      }
+      console.log('   Waiting for device to register with ADB...');
+    }
+  }
+
+  if (!deviceFound) {
+    throw new Error('No online Android emulator or device detected by ADB');
+  }
+
+  console.log('⏳ Waiting for system boot animations to finish...');
+  let booted = false;
+  for (let i = 0; i < 45; i++) {
+    const bootCompleted = await runCmd(`${adbCall} shell getprop sys.boot_completed`);
+    if (bootCompleted === '1') {
+      booted = true;
+      break;
+    }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
+  if (!booted) {
+    console.log('⚠️ Warning: sys.boot_completed did not return 1, but continuing tests anyway...');
+  } else {
+    console.log('✅ Android emulator fully booted and ready.');
+  }
+
+  // Dismiss keyguard/lockscreen if active
+  await runCmd(`${adbCall} shell wm dismiss-keyguard`);
+  // Dismiss any system UI unresponsive alerts/dialogs
+  await runCmd(`${adbCall} shell input keyevent 4`);
+  await runCmd(`${adbCall} shell input keyevent 4`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TEST RUNNER
+// ═══════════════════════════════════════════════════════════════════════════════
+async function runTests() {
+  // Verify APK exists before attempting to connect
+  const apkNative = APK_PATH.replace(/\//g, path.sep);
+  if (!fs.existsSync(apkNative)) {
+    throw new Error(`APK not found at path: ${apkNative}`);
+  }
+  console.log(`📦 APK found: ${apkNative}`);
+
+  const wdOpts = {
+    hostname: '127.0.0.1',
+    port: APPIUM_PORT,
+    path: '/',
+    protocol: 'http',
+    logLevel: 'warn',
+    connectionRetryTimeout: 180000,
+    connectionRetryCount: 3,
+    transformRequest: (requestOptions) => {
+      if (requestOptions.headers && typeof requestOptions.headers.delete === 'function') {
+        requestOptions.headers.delete('Connection');
+        requestOptions.headers.delete('Content-Length');
+      }
+      return requestOptions;
+    },
+    capabilities: {
+      platformName: 'Android',
+      'appium:deviceName': 'emulator-5554',
+      'appium:udid': 'emulator-5554',
+      'appium:app': apkNative,
+      'appium:automationName': 'UiAutomator2',
+      'appium:newCommandTimeout': 3600,
+      'appium:autoGrantPermissions': true,
+      'appium:noReset': false,
+      'appium:fullReset': false,
+      'appium:uiautomator2ServerLaunchTimeout': 90000,
+      'appium:uiautomator2ServerInstallTimeout': 90000,
+      'appium:androidInstallTimeout': 90000,
+      'appium:adbExecTimeout': 60000,
+    }
+  };
+
+  console.log('\n🧪 Initializing Appium WebDriver client...');
+  driver = await remote(wdOpts);
+  console.log('📲 TruthGuard Android App launched successfully.');
+
+  // ── MODULE 1: APP LOAD & GLOBAL STRUCTURE ──────────────
+  console.log('\n📋 MODULE 1: App Load & Global Structure');
+
+  await tc('App Load', 'TC-001', 'App loads successfully', 'Verify the package loads without crash', async () => {
+    const pkg = await driver.getCurrentPackage();
+    if (!pkg.includes('truthguard')) throw new Error(`Unexpected package: ${pkg}`);
   });
 
-  await tc('E2E Flow', 'TC-135', 'Home mini-stats and dashboard stats match', 'Both stat-quick-verified and dashboard-total are equal', async () => {
-    await goHome();
-    const homeStat = await driver.findElement(By.id('stat-quick-verified')).getText();
-    await navigateTo('dashboard');
-    const dashStat = await driver.findElement(By.id('dashboard-total')).getText();
-    if (homeStat !== dashStat) throw new Error(`Home: ${homeStat}, Dashboard: ${dashStat}`);
+  await tc('App Load', 'TC-002', 'Home screen title correct', 'Title text "TRUTHGUARD" is visible', async () => {
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  await tc('App Load', 'TC-003', 'Hero subtitle visible', 'Subtitle "AI Powered Fake News Detection" is visible', async () => {
+    await assertTextPresent('AI Powered Fake News Detection');
+  });
+
+  await tc('App Load', 'TC-004', 'Shield emoji logo visible', 'Shield logo text "🛡️" is visible', async () => {
+    await assertTextPresent('🛡️');
+  });
+
+  await tc('App Load', 'TC-005', 'Verify News button exists', 'Button containing text "Verify News" is visible', async () => {
+    const btn = await getElByText('Verify News');
+    if (!await btn.isExisting()) throw new Error('Verify News button not found');
+  });
+
+  await tc('App Load', 'TC-006', 'Trending News button exists', 'Button containing text "Trending News" is visible', async () => {
+    const btn = await getElByText('Trending News');
+    if (!await btn.isExisting()) throw new Error('Trending News button not found');
+  });
+
+  await tc('App Load', 'TC-007', 'Dashboard button exists', 'Button containing text "Dashboard" is visible', async () => {
+    const btn = await getElByText('Dashboard');
+    if (!await btn.isExisting()) throw new Error('Dashboard button not found');
+  });
+
+  await tc('App Load', 'TC-008', 'About button exists', 'Button containing text "About" is visible', async () => {
+    const btn = await getElByText('About');
+    if (!await btn.isExisting()) throw new Error('About button not found');
+  });
+
+  await tc('App Load', 'TC-009', 'Version indicator visible', 'Version text "Version 1.0" is visible', async () => {
+    await assertTextPresent('Version 1.0');
+  });
+
+  // ── MODULE 2: SIDEBAR / SCREEN NAVIGATION ──────────────
+  console.log('\n📋 MODULE 2: Sidebar / Screen Navigation');
+
+  await tc('Navigation', 'TC-010', 'Navigate Home → Verify Screen', 'Click Verify News and verify Verify Screen is active', async () => {
+    await clickText('Verify News');
+    await assertTextPresent('Verify News');
+  });
+
+  await tc('Navigation', 'TC-011', 'Navigate Verify Screen → Home', 'Press system Back button and verify Home Screen is active', async () => {
+    await goBack();
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  await tc('Navigation', 'TC-012', 'Navigate Home → Trending Screen', 'Click Trending News and verify Trending Screen is active', async () => {
+    await clickText('Trending News');
+    await assertTextPresent('Trending News');
+  });
+
+  await tc('Navigation', 'TC-013', 'Navigate Trending Screen → Home', 'Press system Back button and verify Home Screen is active', async () => {
+    await goBack();
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  await tc('Navigation', 'TC-014', 'Navigate Home → Dashboard Screen', 'Click Dashboard and verify Dashboard Screen is active', async () => {
+    await clickText('Dashboard');
+    await assertTextPresent('Dashboard');
+  });
+
+  await tc('Navigation', 'TC-015', 'Navigate Dashboard Screen → Home', 'Press system Back button and verify Home Screen is active', async () => {
+    await goBack();
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  await tc('Navigation', 'TC-016', 'Navigate Home → About Screen', 'Click About and verify About Screen is active', async () => {
+    await clickText('About');
+    await assertTextPresent('TruthGuard');
+  });
+
+  await tc('Navigation', 'TC-017', 'Navigate About Screen → Home', 'Press system Back button and verify Home Screen is active', async () => {
+    await goBack();
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  // ── MODULE 3: NEWS VERIFICATION SYSTEM ──────────────
+  console.log('\n📋 MODULE 3: News Verification System');
+
+  await tc('News Verification', 'TC-018', 'Outlined text field present', 'EditText input field is visible on Verify Screen', async () => {
+    await clickText('Verify News');
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    if (!await input.isExisting()) throw new Error('EditText input field not found');
+  });
+
+  await tc('News Verification', 'TC-019', 'Analyze button present', 'Analyze button is visible on Verify Screen', async () => {
+    const btn = await getElByText('Analyze');
+    if (!await btn.isExisting()) throw new Error('Analyze button not found');
+  });
+
+  await tc('News Verification', 'TC-020', 'Analyze genuine news', 'Verify genuine news is analyzed correctly', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    await input.setValue('NASA scientists confirm space mission successfully reached orbit around Earth.');
+    const btn = await getElByText('Analyze');
+    await btn.click();
+    await driver.pause(1500);
+  });
+
+  await tc('News Verification', 'TC-021', 'Genuine result text is correct', 'Result card shows Likely Genuine News', async () => {
+    await assertTextPresent('Likely Genuine News');
+  });
+
+  await tc('News Verification', 'TC-022', 'Genuine result confidence is 94%', 'Result confidence shows 94%', async () => {
+    await assertTextPresent('94%');
+  });
+
+  await tc('News Verification', 'TC-023', 'Genuine recommendation correct', 'Result recommendation shows reliable message', async () => {
+    await assertTextPresent('This news appears reliable');
+  });
+
+  await tc('News Verification', 'TC-024', 'Analyze fake news (using "fake")', 'Input contains "fake" → Likely Fake News', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    await input.setValue('This is a completely fake news story about the government.');
+    const btn = await getElByText('Analyze');
+    await btn.click();
+    await driver.pause(1500);
+  });
+
+  await tc('News Verification', 'TC-025', 'Fake result text is correct', 'Result card shows Likely Fake News', async () => {
+    await assertTextPresent('Likely Fake News');
+  });
+
+  await tc('News Verification', 'TC-026', 'Fake result confidence is 88%', 'Result confidence shows 88%', async () => {
+    await assertTextPresent('88%');
+  });
+
+  await tc('News Verification', 'TC-027', 'Fake recommendation correct', 'Result recommendation suggests verification', async () => {
+    await assertTextPresent('Verify this news using trusted sources');
+  });
+
+  await tc('News Verification', 'TC-028', 'Analyze hoax news (using "hoax")', 'Input contains "hoax" → Likely Fake News', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    await input.setValue('A dangerous hoax is spreading on social media.');
+    const btn = await getElByText('Analyze');
+    await btn.click();
+    await driver.pause(1500);
+    await assertTextPresent('Likely Fake News');
+  });
+
+  await tc('News Verification', 'TC-029', 'Analyze rumor news (using "rumor")', 'Input contains "rumor" → Likely Fake News', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    await input.setValue('There is a rumor that local schools are closing tomorrow.');
+    const btn = await getElByText('Analyze');
+    await btn.click();
+    await driver.pause(1500);
+    await assertTextPresent('Likely Fake News');
+  });
+
+  await tc('News Verification', 'TC-030', 'Analyze clickbait news (using "clickbait")', 'Input contains "clickbait" → Likely Fake News', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    await input.setValue('You wont believe this shocking clickbait headline!');
+    const btn = await getElByText('Analyze');
+    await btn.click();
+    await driver.pause(1500);
+    await assertTextPresent('Likely Fake News');
+  });
+
+  await tc('News Verification', 'TC-031', 'Analyze shocking news (using "shocking")', 'Input contains "shocking" → Likely Fake News', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    await input.setValue('A shocking report reveals unexpected details.');
+    const btn = await getElByText('Analyze');
+    await btn.click();
+    await driver.pause(1500);
+    await assertTextPresent('Likely Fake News');
+  });
+
+  await tc('News Verification', 'TC-032', 'Empty verification behavior', 'Submitting empty text produces Likely Genuine News', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    await input.setValue('');
+    const btn = await getElByText('Analyze');
+    await btn.click();
+    await driver.pause(1500);
+    await assertTextPresent('Likely Genuine News');
+  });
+
+  await tc('News Verification', 'TC-033', 'Case-insensitive classification', 'UPPERCASE keyword "HOAX" triggers Fake', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    await input.setValue('THIS IS A MASSIVE HOAX REPORTED ONLINE.');
+    const btn = await getElByText('Analyze');
+    await btn.click();
+    await driver.pause(1500);
+    await assertTextPresent('Likely Fake News');
+  });
+
+  await tc('News Verification', 'TC-034', 'Navigate back to home from Verify', 'Verify screen exit functions correctly', async () => {
+    await goBack();
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  // ── MODULE 4: TRENDING NEWS ──────────────
+  console.log('\n📋 MODULE 4: Trending News');
+
+  await tc('Trending News', 'TC-035', 'Trending Screen header visible', 'Trending News header is rendered', async () => {
+    await clickText('Trending News');
+    await assertTextPresent('Trending News');
+  });
+
+  await tc('Trending News', 'TC-036', 'BBC News Item visible', 'Trending list contains BBC article', async () => {
+    await assertTextPresent('BBC');
+    await assertTextPresent('Scientists discover new climate monitoring technology');
+  });
+
+  await tc('Trending News', 'TC-037', 'Reuters News Item visible', 'Trending list contains Reuters article', async () => {
+    await assertTextPresent('Reuters');
+    await assertTextPresent('AI transforming healthcare worldwide');
+  });
+
+  await tc('Trending News', 'TC-038', 'NASA News Item visible', 'Trending list contains NASA article', async () => {
+    await assertTextPresent('NASA');
+    await assertTextPresent('Space mission successfully reaches orbit');
+  });
+
+  await tc('Trending News', 'TC-039', 'Bloomberg News Item visible', 'Trending list contains Bloomberg article', async () => {
+    await assertTextPresent('Bloomberg');
+    await assertTextPresent('Global economy shows positive growth');
+  });
+
+  await tc('Trending News', 'TC-040', 'UNESCO News Item visible', 'Trending list contains UNESCO article', async () => {
+    await assertTextPresent('UNESCO');
+    await assertTextPresent('Education sector adopts AI learning tools');
+  });
+
+  await tc('Trending News', 'TC-041', 'Navigate back to home from Trending', 'Trending screen exit functions correctly', async () => {
+    await goBack();
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  // ── MODULE 5: DASHBOARD METRICS ──────────────
+  console.log('\n📋 MODULE 5: Dashboard Metrics');
+
+  await tc('Dashboard', 'TC-042', 'Dashboard Screen header visible', 'Dashboard header is rendered', async () => {
+    await clickText('Dashboard');
+    await assertTextPresent('Dashboard');
+  });
+
+  await tc('Dashboard', 'TC-043', 'Articles Verified card visible', 'Verified stat card shows label and value', async () => {
+    await assertTextPresent('Articles Verified');
+    await assertTextPresent('25');
+  });
+
+  await tc('Dashboard', 'TC-044', 'True News card visible', 'True news stat card shows label and value', async () => {
+    await assertTextPresent('True News');
+    await assertTextPresent('18');
+  });
+
+  await tc('Dashboard', 'TC-045', 'Fake News card visible', 'Fake news stat card shows label and value', async () => {
+    await assertTextPresent('Fake News');
+    await assertTextPresent('7');
+  });
+
+  await tc('Dashboard', 'TC-046', 'Accuracy card visible', 'Accuracy stat card shows label and value', async () => {
+    await assertTextPresent('Accuracy');
+    await assertTextPresent('92%');
+  });
+
+  await tc('Dashboard', 'TC-047', 'Navigate back to home from Dashboard', 'Dashboard screen exit functions correctly', async () => {
+    await goBack();
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  // ── MODULE 6: ABOUT SCREEN DETAILS ──────────────
+  console.log('\n📋 MODULE 6: About Screen Details');
+
+  await tc('About', 'TC-048', 'About Screen header visible', 'About screen title is rendered', async () => {
+    await clickText('About');
+    await assertTextPresent('TruthGuard');
+  });
+
+  await tc('About', 'TC-049', 'Developer info visible', 'Educational purpose indicator text is visible', async () => {
+    await assertTextPresent('Developed for Educational Purpose');
+  });
+
+  await tc('About', 'TC-050', 'Version label visible', 'Version info text "Version : 1.0" is visible', async () => {
+    await assertTextPresent('Version : 1.0');
+  });
+
+  await tc('About', 'TC-051', 'Technology stack details visible', 'Kotlin technology tag is visible', async () => {
+    await assertTextPresent('Technology : Kotlin + Jetpack Compose + AI');
+  });
+
+  await tc('About', 'TC-052', 'Copyright notice visible', 'Copyright notice text "© TruthGuard 2025" is visible', async () => {
+    await assertTextPresent('© TruthGuard 2025');
+  });
+
+  await tc('About', 'TC-053', 'Navigate back to home from About', 'About screen exit functions correctly', async () => {
+    await goBack();
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  // ── MODULE 7: ROBUSTNESS & EDGE CASES ──────────────
+  console.log('\n📋 MODULE 7: Robustness & Edge Cases');
+
+  await tc('Edge Cases', 'TC-054', 'Verify screen multiple analyses', 'Multiple sequential verifications work without screen crash', async () => {
+    await clickText('Verify News');
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    const btn = await getElByText('Analyze');
+
+    await input.setValue('First genuine news sample text.');
+    await btn.click();
+    await driver.pause(1000);
+    await assertTextPresent('Likely Genuine News');
+
+    await input.setValue('Second fake rumor sample text.');
+    await btn.click();
+    await driver.pause(1000);
+    await assertTextPresent('Likely Fake News');
+  });
+
+  await tc('Edge Cases', 'TC-055', 'Verify back navigation clears screen state', 'Exiting and re-entering verify clears previous result card', async () => {
+    await goBack();
+    await clickText('Verify News');
+    const resultCardTitle = await driver.$('android=new UiSelector().text("Analysis Result")');
+    if (await resultCardTitle.isExisting()) throw new Error('Result card should be hidden on fresh load');
+  });
+
+  await tc('Edge Cases', 'TC-056', 'Verify long input handling', 'Inputting extremely long text does not cause UI lag/crash', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    const btn = await getElByText('Analyze');
+    const longText = 'A '.repeat(500) + 'genuine news report.';
+    await input.setValue(longText);
+    await btn.click();
+    await driver.pause(2000);
+    await assertTextPresent('Likely Genuine News');
+  });
+
+  await tc('Edge Cases', 'TC-057', 'Verify special characters input', 'Text containing emojis and symbols is processed correctly', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    const btn = await getElByText('Analyze');
+    await input.setValue('Climate report! 🌍🔥 (Fake facts reported by bloggers).');
+    await btn.click();
+    await driver.pause(1500);
+    await assertTextPresent('Likely Fake News');
+  });
+
+  await tc('Edge Cases', 'TC-058', 'Verify input with only whitespace', 'Text containing only spaces behaves as genuine', async () => {
+    const input = await driver.$('android=new UiSelector().className("android.widget.EditText")');
+    const btn = await getElByText('Analyze');
+    await input.setValue('     ');
+    await btn.click();
+    await driver.pause(1500);
+    await assertTextPresent('Likely Genuine News');
+  });
+
+  await tc('Edge Cases', 'TC-059', 'Exit verify screen at end', 'Return to home screen', async () => {
+    await goBack();
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  // ── MODULE 8: END-TO-END FLOW INTEGRATION ──────────────
+  console.log('\n📋 MODULE 8: End-to-End Flow Integration');
+
+  await tc('E2E Flow', 'TC-060', 'Navigate all screens sequentially', 'All screens open and transition successfully', async () => {
+    await clickText('Verify News');
+    await goBack();
+    await clickText('Trending News');
+    await goBack();
+    await clickText('Dashboard');
+    await goBack();
+    await clickText('About');
+    await goBack();
+    await assertTextPresent('TRUTHGUARD');
+  });
+
+  await tc('E2E Flow', 'TC-061', 'Dashboard counts verification count consistency', 'Articles Verified shows expected default baseline', async () => {
+    await clickText('Dashboard');
+    await assertTextPresent('25');
+    await goBack();
+  });
+
+  await tc('E2E Flow', 'TC-062', 'Dashboard accuracy percentage consistency', 'Accuracy shows expected default baseline', async () => {
+    await clickText('Dashboard');
+    await assertTextPresent('92%');
+    await goBack();
+  });
+
+  await tc('E2E Flow', 'TC-063', 'Dashboard fake count consistency', 'Fake News shows expected default baseline', async () => {
+    await clickText('Dashboard');
+    await assertTextPresent('7');
+    await goBack();
+  });
+
+  await tc('E2E Flow', 'TC-064', 'Dashboard true count consistency', 'True News shows expected default baseline', async () => {
+    await clickText('Dashboard');
+    await assertTextPresent('18');
+    await goBack();
   });
 
   console.log('\n✅ All tests completed.');
@@ -945,8 +719,8 @@ async function generateReport() {
   // Title banner
   summary.mergeCells('A1:H1');
   const titleCell = summary.getCell('A1');
-  titleCell.value = '🛡️  TRUTHGUARD WEB APPLICATION  —  APPIUM E2E TEST REPORT';
-  titleCell.font   = { name: 'Outfit', size: 18, bold: true, color: { argb: `FF${COLORS.headerText}` } };
+  titleCell.value = '🛡️  TRUTHGUARD ANDROID APP  —  APPIUM E2E TEST REPORT';
+  titleCell.font   = { name: 'Outfit', size: 16, bold: true, color: { argb: `FF${COLORS.headerText}` } };
   titleCell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${COLORS.headerBg}` } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
   summary.getRow(1).height = 52;
@@ -954,7 +728,7 @@ async function generateReport() {
   // Subtitle bar
   summary.mergeCells('A2:H2');
   const subCell = summary.getCell('A2');
-  subCell.value = `Generated: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}  |  Engine: Node.js + Appium WebDriver 4.x  |  Browser: Google Chrome (Headless)`;
+  subCell.value = `Generated: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}  |  Engine: Appium 2.x + UiAutomator2  |  Device: Android Emulator (Pixel_6)`;
   subCell.font  = { name: 'Plus Jakarta Sans', size: 10, color: { argb: 'FFB0C4DE' } };
   subCell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${COLORS.subHeaderBg}` } };
   subCell.alignment = { vertical: 'middle', horizontal: 'center' };
@@ -977,7 +751,6 @@ async function generateReport() {
     c.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${kpi.fg}` } };
     c.alignment = { vertical: 'middle', horizontal: 'center' };
 
-    const lrow = parseInt(kpi.col.charCodeAt(0)) + 2; // unused: using next row approach
     summary.mergeCells(`${kpi.col}6:${kpi.col}6`);
     const labelCell = summary.getCell(`${kpi.col}6`);
     labelCell.value = kpi.label;
@@ -993,15 +766,15 @@ async function generateReport() {
 
   // Execution details table
   const detailsHeaders = [
-    ['Test Suite', 'TruthGuard Web Application E2E'],
-    ['Target URL', `http://localhost:${PORT}`],
+    ['Test Suite', 'TruthGuard Android Application E2E'],
+    ['Target Device', 'Android Emulator (Pixel_6)'],
     ['Total Test Cases', total],
     ['Passed', passed],
     ['Failed', failed],
     ['Pass Rate', `${passRate}%`],
     ['Total Duration', `${duration}s`],
-    ['Browser', 'Google Chrome (Headless)'],
-    ['WebDriver', 'selenium-webdriver 4.x'],
+    ['Automation Engine', 'Appium 2.x + UiAutomator2'],
+    ['Test Client', 'WebdriverIO v8'],
     ['Test Framework', 'Node.js Custom Runner'],
     ['Report Generated', new Date().toLocaleString('en-IN')],
   ];
@@ -1064,16 +837,16 @@ async function generateReport() {
   const tcSheet = wb.addWorksheet('🧪 Test Cases', { views: [{ showGridLines: true, state: 'frozen', ySplit: 3 }] });
 
   // Title banner
-  tcSheet.mergeCells('A1:G1');
+  tcSheet.mergeCells('A1:H1');
   const tcTitle = tcSheet.getCell('A1');
-  tcTitle.value = '🛡️  TRUTHGUARD — ALL TEST CASES DETAIL';
+  tcTitle.value = '🛡️  TRUTHGUARD ANDROID — APPIUM TEST CASES DETAIL';
   tcTitle.font  = { name: 'Outfit', size: 15, bold: true, color: { argb: `FF${COLORS.headerText}` } };
   tcTitle.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${COLORS.headerBg}` } };
   tcTitle.alignment = { vertical: 'middle', horizontal: 'center' };
   tcSheet.getRow(1).height = 44;
 
   // Info bar
-  tcSheet.mergeCells('A2:G2');
+  tcSheet.mergeCells('A2:H2');
   const tcInfo = tcSheet.getCell('A2');
   tcInfo.value = `Total: ${total} | Passed: ${passed} | Failed: ${failed} | Pass Rate: ${passRate}% | Duration: ${duration}s`;
   tcInfo.font  = { name: 'Plus Jakarta Sans', size: 10, color: { argb: 'FFFFFFFF' } };
@@ -1093,7 +866,7 @@ async function generateReport() {
     cell.border    = { bottom: { style: 'medium', color: { argb: `FF${COLORS.moduleText}` } } };
   });
 
-  // Data rows, grouped by module
+  // Data rows
   let rowIndex = 0;
   let currentModule = null;
   for (const r of results) {
@@ -1198,7 +971,7 @@ async function generateReport() {
   return REPORT_FILE;
 }
 
-// ─── MARKDOWN SUMMARY (for GitHub Actions Step Summary) ──────────────────────
+// ─── MARKDOWN SUMMARY ────────────────────────────────────────────────────────
 function generateMarkdownSummary() {
   const passed   = results.filter(r => r.status === 'PASSED').length;
   const failed   = results.filter(r => r.status === 'FAILED').length;
@@ -1209,17 +982,15 @@ function generateMarkdownSummary() {
 
   const passBadge = passRate === 100 ? '🟢' : passRate >= 80 ? '🟡' : '🔴';
 
-  let md = `# 🛡️ TruthGuard Web — Appium E2E Test Report\n\n`;
-  md += `> **Generated:** ${timestamp} &nbsp;|&nbsp; **Browser:** Google Chrome (Headless) &nbsp;|&nbsp; **Engine:** Node.js + Appium WebDriver 4.x\n\n`;
+  let md = `# 🛡️ TruthGuard Android — Appium E2E Test Report\n\n`;
+  md += `> **Generated:** ${timestamp} &nbsp;|&nbsp; **Device:** Android Emulator (Pixel_6) &nbsp;|&nbsp; **Engine:** Appium 2.x + WebDriverIO v8\n\n`;
   md += `---\n\n`;
 
-  // KPI summary table
   md += `## 📊 Results Summary\n\n`;
   md += `| ${passBadge} Pass Rate | 📋 Total Tests | ✅ Passed | ❌ Failed | ⏱️ Duration |\n`;
   md += `|:-----------:|:--------------:|:---------:|:---------:|:----------:|\n`;
   md += `| **${passRate}%** | **${total}** | **${passed}** | **${failed}** | **${duration}s** |\n\n`;
 
-  // Module breakdown table
   const modules = [...new Set(results.map(r => r.module))];
   md += `## 📋 Module Breakdown\n\n`;
   md += `| Module | Tests | ✅ Passed | ❌ Failed | Pass Rate |\n`;
@@ -1234,7 +1005,6 @@ function generateMarkdownSummary() {
   }
   md += `\n`;
 
-  // Failed tests (if any)
   const failedList = results.filter(r => r.status === 'FAILED');
   if (failedList.length > 0) {
     md += `## ❌ Failed Test Cases\n\n`;
@@ -1251,7 +1021,7 @@ function generateMarkdownSummary() {
   }
 
   md += `---\n`;
-  md += `*Report also available as a downloadable Excel artifact — see the **Artifacts** section below this run.*\n`;
+  md += `*Report also available as a downloadable Excel artifact.*\n`;
 
   const summaryFile = path.join(__dirname, 'test-summary.md');
   fs.writeFileSync(summaryFile, md, 'utf8');
@@ -1262,23 +1032,32 @@ function generateMarkdownSummary() {
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('\n═══════════════════════════════════════════════════════════');
-  console.log('   🛡️  TRUTHGUARD WEB — APPIUM E2E TEST RUNNER');
+  console.log('   🛡️  TRUTHGUARD ANDROID — APPIUM E2E TEST RUNNER');
   console.log('═══════════════════════════════════════════════════════════');
 
-  await startServer();
-
   try {
+    // 1. Verify/Wait for Emulator Boot completion
+    await verifyEmulatorBooted();
+
+    // 2. Start Appium Server
+    await startAppiumServer();
+
+    // 3. Run Tests
     await runTests();
   } catch (err) {
     console.error('\n🔴 Critical runner error:', err.message);
   } finally {
     if (driver) {
-      console.log('\n🧹 Closing Chrome WebDriver...');
-      await driver.quit();
+      console.log('\n🧹 Closing Appium WebDriver client session...');
+      try {
+        await driver.deleteSession();
+      } catch (e) {}
     }
-    if (serverProcess) {
-      console.log('🧹 Stopping web server...');
-      serverProcess.kill();
+    if (appiumProcess) {
+      console.log('🧹 Stopping Appium server...');
+      try {
+        appiumProcess.kill();
+      } catch (e) {}
     }
 
     const passed  = results.filter(r => r.status === 'PASSED').length;
@@ -1291,10 +1070,13 @@ async function main() {
     console.log(`  ⏱️  Duration: ${duration}s  |  Pass Rate: ${Math.round((passed/total)*100)}%`);
     console.log('═══════════════════════════════════════════════════════════');
 
-    await generateReport();
-    generateMarkdownSummary();
-
-    console.log('\n✨ Testing complete! Open the .xlsx report or check the GitHub Actions Summary for full details.\n');
+    if (results.length > 0) {
+      await generateReport();
+      generateMarkdownSummary();
+      console.log('\n✨ Testing complete! Open the Excel report for full details.\n');
+    } else {
+      console.log('\n⚠️ No tests were executed due to early setup failures.\n');
+    }
   }
 }
 
