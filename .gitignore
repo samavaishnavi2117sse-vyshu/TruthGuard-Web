@@ -20,5 +20,3 @@ __pycache__/
 # Environment variables
 .env
 
-# Selenium tests (removed — Appium only)
-selenium-testing/

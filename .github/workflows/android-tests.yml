@@ -1,0 +1,150 @@
+name: TruthGuard Android E2E Testing CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  android-tests:
+    name: 📱 Appium E2E Tests — 100 Test Cases
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. CHECKOUT ──────────────────────────────────────────────────────────
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      # ── 2. KVM HARDWARE ACCELERATION ─────────────────────────────────────────
+      - name: ⚡ Enable KVM Hardware Acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # ── 3. JDK ───────────────────────────────────────────────────────────────
+      - name: ☕ Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      # ── 4. NODE.JS & APPIUM ──────────────────────────────────────────────────
+      - name: 🟢 Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 🚀 Install Appium & UIAutomator2 Driver
+        run: |
+          npm install -g appium@3.0.0-rc.2
+          appium driver install uiautomator2
+          appium driver list --installed
+
+      # ── 5. PYTHON ────────────────────────────────────────────────────────────
+      - name: 🐍 Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'appium-testing/requirements.txt'
+
+      - name: 📦 Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r appium-testing/requirements.txt
+          pip list | grep -iE "appium|selenium|openpyxl"
+
+      # ── 6. BUILD DEBUG APK ───────────────────────────────────────────────────
+      - name: 🔨 Build Debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+
+      # ── 7. START APPIUM SERVER ──────────────────────────────────────────────
+      - name: 🚀 Start Appium Server
+        run: |
+          nohup appium --port 4723 --address 127.0.0.1 --log-level error > /tmp/appium.log 2>&1 &
+          echo $! > /tmp/appium.pid
+          sleep 30
+          curl -sf http://127.0.0.1:4723/status && echo "Appium is ready" || { echo "Appium log:"; cat /tmp/appium.log; exit 1; }
+
+      # ── 8. RUN EMULATOR + TESTS ─────────────────────────────────────────────
+      - name: 📱 Run Appium E2E Tests
+        timeout-minutes: 20
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          CI: 'true'
+          APK_PATH: ${{ github.workspace }}/app/build/outputs/apk/debug/app-debug.apk
+          AVD_NAME: 'test'
+        with:
+          api-level: 33
+          target: default
+          arch: x86_64
+          avd-name: test
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            echo "=== Emulator ready — listing devices ==="
+            adb devices -l
+
+            echo "=== Verify APK exists ==="
+            ls -lh "$APK_PATH"
+
+            echo "=== Running Python test suite ==="
+            python appium-testing/test.py
+
+            echo "=== Report files ==="
+            ls -lh appium-testing/ | grep -E "xlsx|md" || echo "No report files yet"
+
+      # ── 9. STOP APPIUM SERVER ───────────────────────────────────────────────
+      - name: 🛑 Stop Appium Server
+        if: always()
+        run: |
+          if [ -f /tmp/appium.pid ]; then
+            kill "$(cat /tmp/appium.pid)" 2>/dev/null || true
+            echo "Appium server stopped."
+          else
+            echo "No Appium PID found."
+          fi
+          echo "=== Appium Log (Last 200 lines) ==="
+          tail -n 200 /tmp/appium.log || true
+
+      # ── 8. PUBLISH STEP SUMMARY ──────────────────────────────────────────────
+      - name: 📋 Publish Results to Actions Summary
+        if: always()
+        run: |
+          if [ -f appium-testing/test-summary.md ]; then
+            cat appium-testing/test-summary.md >> $GITHUB_STEP_SUMMARY
+            echo "✅ Summary published"
+          else
+            echo "## ⚠️ Test Summary Not Found" >> $GITHUB_STEP_SUMMARY
+            echo "test-summary.md was not generated — check runner logs above." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # ── 9. UPLOAD EXCEL REPORT ───────────────────────────────────────────────
+      - name: 📤 Upload Excel Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Appium_E2E_Report_TruthGuard_Run-${{ github.run_number }}
+          path: appium-testing/Appium_E2E_Report_*.xlsx
+          retention-days: 90
+          if-no-files-found: warn
+
+      # ── 10. RESULT BANNER ────────────────────────────────────────────────────
+      - name: 📋 How to Access the Report
+        if: always()
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║    ✅ TruthGuard Appium E2E — Test Run Complete             ║"
+          echo "╠══════════════════════════════════════════════════════════════╣"
+          echo "║  📊 View inline  → Summary tab (left sidebar of this run)  ║"
+          echo "║  📥 Download xlsx → Artifacts section at bottom of run     ║"
+          echo "╚══════════════════════════════════════════════════════════════╝"
